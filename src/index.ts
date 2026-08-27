@@ -1,9 +1,26 @@
 import { Hono } from "hono";
+import { createJsonRpcHandler } from "./json-rpc";
+import { mathMethods } from "./math/methods";
+
+const handle = createJsonRpcHandler({
+  ...mathMethods,
+});
 
 const app = new Hono();
 
+app.post("/", async (c) => {
+  const raw = await c.req.text();
+  const result = handle(raw);
+
+  if (result === null) return c.body(null, 204);
+  return c.json(result, 200);
+});
+
 app.get("/", (c) => {
-  return c.text("Hello Hono!");
+  return c.json({
+    status: "ok",
+    message: "JSON-RPC 2.0 endpoint — use POST /",
+  });
 });
 
 export default app;
