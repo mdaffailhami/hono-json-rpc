@@ -1,50 +1,55 @@
-import { JsonRpcResponse } from "./types";
+import { JsonRpcRequest, JsonRpcResponse, JsonRpcMethods } from "./types";
 import { JSON_RPC_ERRORS } from "./constants";
-import { makeError, parseRequest, handleRequest } from "./helpers";
-
-type MethodHandler = (params: Record<string, unknown> | unknown[]) => unknown;
+import { makeError, handleRequest } from "./helpers";
 
 /**
- * Create a JSON-RPC 2.0 handler bound to the given methods.
- * Returns a function that takes a raw body string and returns the response(s).
+ * Create a JSON-RPC 2.0 app bound to the given methods.
+ * Returns an object with a `.handle()` method that accepts raw JSON
+ * and returns response(s).
  */
-export function createJsonRpcHandler(methods: Record<string, MethodHandler>) {
-  return function handle(
-    raw: string,
-  ): JsonRpcResponse | JsonRpcResponse[] | null {
-    let body: any;
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      return makeError(null, JSON_RPC_ERRORS.PARSE_ERROR);
-    }
-
-    if (Array.isArray(body)) {
-      if (body.length === 0)
-        return makeError(null, JSON_RPC_ERRORS.INVALID_REQUEST);
-
-      const responses: JsonRpcResponse[] = [];
-      for (const item of body) {
-        try {
-          const req = parseRequest(item);
-          const res = handleRequest(req, methods);
-          if (res) responses.push(res);
-        } catch (err: any) {
-          responses.push(makeError(item?.id ?? null, err));
-        }
+function createJsonRpcApp(methods: JsonRpcMethods) {
+  return {
+    handle(raw: string): JsonRpcResponse | JsonRpcResponse[] | null {
+      // Parse raw JSON — invalid syntax returns a parse error
+      let body: any;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        return makeError(null, JSON_RPC_ERRORS.PARSE_ERROR);
       }
-      if (responses.length === 0) return null;
-      return responses;
-    }
 
-    try {
-      const req = parseRequest(body);
-      return handleRequest(req, methods);
-    } catch (err: any) {
-      return makeError(body?.id ?? null, err);
-    }
+      // Batch request: array of individual requests
+      if (Array.isArray(body)) {
+        if (body.length === 0)
+          return makeError(null, JSON_RPC_ERRORS.INVALID_REQUEST);
+
+        const responses: JsonRpcResponse[] = [];
+        for (const item of body) {
+          // Validate request structure via Zod
+          const parsed = JsonRpcRequest.safeParse(item);
+          if (!parsed.success) {
+            responses.push(
+              makeError(item?.id ?? null, JSON_RPC_ERRORS.INVALID_REQUEST),
+            );
+            continue;
+          }
+          // Execute method — handleRequest catches method errors internally
+          const res = handleRequest(parsed.data, methods);
+          if (res) responses.push(res);
+        }
+        if (responses.length === 0) return null;
+        return responses;
+      }
+
+      // Single request: validate then execute
+      const parsed = JsonRpcRequest.safeParse(body);
+      if (!parsed.success)
+        return makeError(body?.id ?? null, JSON_RPC_ERRORS.INVALID_REQUEST);
+      return handleRequest(parsed.data, methods);
+    },
   };
 }
 
-export type { JsonRpcRequest, JsonRpcResponse } from "./types";
+export type { JsonRpcRequest, JsonRpcResponse, JsonRpcMethods } from "./types";
 export { JSON_RPC_ERRORS } from "./constants";
+export { createJsonRpcApp };

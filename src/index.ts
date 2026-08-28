@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import { createJsonRpcHandler } from "./json-rpc";
-import { mathMethods } from "./math/methods";
+import { createJsonRpcApp } from "./json-rpc";
+import { mathMethods } from "./math";
 
-const handle = createJsonRpcHandler({
+const jsonRpcApp = createJsonRpcApp({
   ...mathMethods,
 });
 
@@ -10,7 +10,7 @@ const app = new Hono();
 
 app.post("/", async (c) => {
   const raw = await c.req.text();
-  const result = handle(raw);
+  const result = jsonRpcApp.handle(raw);
 
   if (result === null) return c.body(null, 204);
   return c.json(result, 200);

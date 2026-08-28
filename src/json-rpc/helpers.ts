@@ -1,51 +1,58 @@
-import type { JsonRpcRequest, JsonRpcResponse } from "./types";
+import type {
+  JsonRpcError,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  JsonRpcMethods,
+  JsonRpcId,
+} from "./types";
 import { JSON_RPC_ERRORS } from "./constants";
+import { flattenError } from "zod";
 
-type MethodHandler = (params: Record<string, unknown> | unknown[]) => unknown;
-
-/** Build a JSON-RPC error response. */
-export function makeError(
-  id: string | number | null,
-  error: { code: number; message: string; data?: unknown },
-): JsonRpcResponse {
+/** Build a JSON-RPC 2.0 error response. */
+export function makeError(id: JsonRpcId, error: JsonRpcError): JsonRpcResponse {
   return { jsonrpc: "2.0", error, id };
 }
 
-/** Build a JSON-RPC success response. */
-export function makeResult(
-  id: string | number | null,
-  result: unknown,
-): JsonRpcResponse {
+/** Build a JSON-RPC 2.0 success response. */
+export function makeResult(id: JsonRpcId, result: unknown): JsonRpcResponse {
   return { jsonrpc: "2.0", result, id };
 }
 
-/** Parse and validate a parsed body as a JSON-RPC 2.0 request. Throws if invalid. */
-export function parseRequest(body: unknown): JsonRpcRequest {
-  if (!body || typeof body !== "object" || Array.isArray(body))
-    throw JSON_RPC_ERRORS.INVALID_REQUEST;
-  const req = body as Record<string, unknown>;
-  if (req.jsonrpc !== "2.0" || typeof req.method !== "string")
-    throw JSON_RPC_ERRORS.INVALID_REQUEST;
-  return req as unknown as JsonRpcRequest;
-}
-
-/** Execute a single JSON-RPC request. Returns `null` for notifications. */
+/**
+ * Execute a single JSON-RPC 2.0 request.
+ * Looks up the method handler, calls it, and returns the response.
+ * Returns null for notifications (requests without an id).
+ */
 export function handleRequest(
   req: JsonRpcRequest,
-  methods: Record<string, MethodHandler>,
+  methods: JsonRpcMethods,
 ): JsonRpcResponse | null {
   const handler = methods[req.method];
   if (!handler)
     return makeError(req.id ?? null, JSON_RPC_ERRORS.METHOD_NOT_FOUND);
 
   try {
-    const result = handler(req.params ?? []);
+    const result = handler(req.params);
+    // Notifications don't receive a response
     if (req.id === undefined) return null;
     return makeResult(req.id, result);
   } catch (err: any) {
+    // Notifications don't receive error responses either
     if (req.id === undefined) return null;
-    if (err && typeof err.code === "number" && typeof err.message === "string")
-      return makeError(req.id, err);
+
+    // Handle Zod validation errors from `z.function().implement()` to INVALID_PARAMS
+    if (err?.name === "ZodError" || err?.name === "$ZodError") {
+      // Strip argument index from paths (z.function() input is [schema], so paths start with 0)
+      const issues = err.issues.map((issue: any) => ({
+        ...issue,
+        path: issue.path.slice(1),
+      }));
+      const { formErrors, fieldErrors } = flattenError({ ...err, issues });
+      return makeError(req.id, {
+        ...JSON_RPC_ERRORS.INVALID_PARAMS,
+        data: { root: formErrors, fields: fieldErrors },
+      });
+    }
 
     return makeError(req.id, JSON_RPC_ERRORS.INTERNAL_ERROR);
   }
