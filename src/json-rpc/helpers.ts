@@ -32,7 +32,10 @@ export function handleRequest(
     return makeError(req.id ?? null, JSON_RPC_ERRORS.METHOD_NOT_FOUND);
 
   try {
-    const result = handler(req.params);
+    const hasParams =
+      req.params != null &&
+      !(Array.isArray(req.params) && req.params.length === 0);
+    const result = hasParams ? handler(req.params) : handler();
     // Notifications don't receive a response
     if (req.id === undefined) return null;
     return makeResult(req.id, result);
@@ -47,6 +50,18 @@ export function handleRequest(
         ...issue,
         path: issue.path.slice(1),
       }));
+
+      // Empty path = tuple-level failure = no args passed when method expects them
+      const paramsMissing =
+        req.params == null ||
+        (Array.isArray(req.params) && req.params.length === 0);
+      if (paramsMissing && issues.every((i: any) => i.path.length === 0)) {
+        return makeError(req.id ?? null, {
+          ...JSON_RPC_ERRORS.INVALID_PARAMS,
+          data: { root: ["params is required"], fields: {} },
+        });
+      }
+
       const { formErrors, fieldErrors } = flattenError({ ...err, issues });
       return makeError(req.id, {
         ...JSON_RPC_ERRORS.INVALID_PARAMS,

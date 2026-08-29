@@ -4,6 +4,9 @@
     "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
+    "@open-rpc/playground": "^1.1.2",
+    "@open-rpc/spec-types": "^0.0.2",
+    "glob": "^13.0.6",
     "hono": "^4.13.5",
     "zod": "^4.4.3"
   },

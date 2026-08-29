@@ -62,7 +62,7 @@ export type JsonRpcResponse = z.infer<typeof JsonRpcResponse>;
 export const JsonRpcMethods = z.record(
   z.string(),
   z.function({
-    input: [z.any()],
+    input: [z.any().optional()],
     output: z.any(),
   }),
 );

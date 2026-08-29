@@ -1,13 +1,16 @@
 import { Hono } from "hono";
 import { createJsonRpcApp } from "./json-rpc";
+import { openRpcApp, openRpcMethods } from "./open-rpc";
 import { mathMethods } from "./math";
 
 const jsonRpcApp = createJsonRpcApp({
+  ...openRpcMethods,
   ...mathMethods,
 });
 
 const app = new Hono();
 
+/** JSON-RPC 2.0 endpoint */
 app.post("/", async (c) => {
   const raw = await c.req.text();
   const result = jsonRpcApp.handle(raw);
@@ -16,11 +19,7 @@ app.post("/", async (c) => {
   return c.json(result, 200);
 });
 
-app.get("/", (c) => {
-  return c.json({
-    status: "ok",
-    message: "JSON-RPC 2.0 endpoint — use POST /",
-  });
-});
+/** OpenRPC Playground/Docs */
+app.route("/", openRpcApp);
 
 export default app;
