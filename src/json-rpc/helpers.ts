@@ -1,74 +1,48 @@
-import type {
-  JsonRpcError,
-  JsonRpcRequest,
-  JsonRpcResponse,
-  JsonRpcMethods,
-  JsonRpcId,
-} from "./types";
-import { JSON_RPC_ERRORS } from "./constants";
-import { flattenError } from "zod";
+import { z } from "zod";
+import { JSONRPCErrorException } from "json-rpc-2.0";
+import { JsonRpcMethod } from "./types";
 
-/** Build a JSON-RPC 2.0 error response. */
-export function makeError(id: JsonRpcId, error: JsonRpcError): JsonRpcResponse {
-  return { jsonrpc: "2.0", error, id };
-}
-
-/** Build a JSON-RPC 2.0 success response. */
-export function makeResult(id: JsonRpcId, result: unknown): JsonRpcResponse {
-  return { jsonrpc: "2.0", result, id };
-}
-
-/**
- * Execute a single JSON-RPC 2.0 request.
- * Looks up the method handler, calls it, and returns the response.
- * Returns null for notifications (requests without an id).
- */
-export function handleRequest(
-  req: JsonRpcRequest,
-  methods: JsonRpcMethods,
-): JsonRpcResponse | null {
-  const handler = methods[req.method];
-  if (!handler)
-    return makeError(req.id ?? null, JSON_RPC_ERRORS.METHOD_NOT_FOUND);
-
-  try {
-    const hasParams =
-      req.params != null &&
-      !(Array.isArray(req.params) && req.params.length === 0);
-    const result = hasParams ? handler(req.params) : handler();
-    // Notifications don't receive a response
-    if (req.id === undefined) return null;
-    return makeResult(req.id, result);
-  } catch (err: any) {
-    // Notifications don't receive error responses either
-    if (req.id === undefined) return null;
-
-    // Handle Zod validation errors from `z.function().implement()` to INVALID_PARAMS
-    if (err?.name === "ZodError" || err?.name === "$ZodError") {
-      // Strip argument index from paths (z.function() input is [schema], so paths start with 0)
-      const issues = err.issues.map((issue: any) => ({
-        ...issue,
-        path: issue.path.slice(1),
-      }));
-
-      // Empty path = tuple-level failure = no args passed when method expects them
-      const paramsMissing =
-        req.params == null ||
-        (Array.isArray(req.params) && req.params.length === 0);
-      if (paramsMissing && issues.every((i: any) => i.path.length === 0)) {
-        return makeError(req.id ?? null, {
-          ...JSON_RPC_ERRORS.INVALID_PARAMS,
-          data: { root: ["params is required"], fields: {} },
+export function createJsonRpcMethod<
+  TInput extends Record<string, unknown> | unknown[],
+  TOutput,
+>(opts: {
+  summary: string;
+  input?: z.ZodType<TInput>;
+  output: z.ZodType<TOutput>;
+  body: (params: TInput) => TOutput;
+}): JsonRpcMethod<TInput, TOutput> {
+  const method = ((params: any) => {
+    // Input validation
+    if (opts.input) {
+      const parsedInput = opts.input.safeParse(params);
+      if (!parsedInput.success) {
+        const { formErrors, fieldErrors } = z.flattenError(parsedInput.error);
+        throw new JSONRPCErrorException("Invalid params", -32602, {
+          root: formErrors,
+          fields: fieldErrors,
         });
       }
-
-      const { formErrors, fieldErrors } = flattenError({ ...err, issues });
-      return makeError(req.id, {
-        ...JSON_RPC_ERRORS.INVALID_PARAMS,
-        data: { root: formErrors, fields: fieldErrors },
-      });
+      params = parsedInput.data;
     }
 
-    return makeError(req.id, JSON_RPC_ERRORS.INTERNAL_ERROR);
-  }
+    const result = opts.body(params);
+
+    // Output validation
+    const parsedOutput = opts.output.safeParse(result);
+    if (!parsedOutput.success) {
+      console.error(
+        "Output validation failed:",
+        z.flattenError(parsedOutput.error),
+      );
+      throw new JSONRPCErrorException("Internal error", -32603);
+    }
+
+    return result;
+  }) as JsonRpcMethod<TInput, TOutput>;
+
+  method.input = opts.input;
+  method.output = opts.output;
+  method.summary = opts.summary;
+
+  return method;
 }

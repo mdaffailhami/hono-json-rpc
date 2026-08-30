@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { basename, resolve } from "path";
 import { globSync } from "glob";
 
-/** Playground UI schema configuration — locked server-side, not exposed in URL. */
+/** Playground UI schema configuration. */
 const playgroundQuery = new URLSearchParams({
   "uiSchema[appBar][ui:splitView]": "false",
   "uiSchema[appBar][ui:edit]": "false",
@@ -27,29 +27,30 @@ const jsName = basename(jsPath);
 // so the playground reads config without URL params
 const patchedJs = readFileSync(jsPath, "utf-8").replace(
   "window.location.search",
-  "window.__PLAYGROUND_SEARCH__",
+  "window.__PLAYGROUND_CONFIG__",
 );
 
 // Patch HTML: inject config as global variable before the bundle loads
-const playgroundHtml = readFileSync(
+const patchedHtml = readFileSync(
   resolve(`${playgroundDist}/index.html`),
   "utf-8",
 )
   .replace(
     "</head>",
-    `<script>window.__PLAYGROUND_SEARCH__="${playgroundQuery}";</script>\n</head>`,
+    // Replace `+` with space
+    `<script>window.__PLAYGROUND_CONFIG__="${playgroundQuery.replace(/\+/g, " ")}";</script>\n</head>`,
   )
   .replace("OpenRPC Playground", "Hono JSON-RPC");
 
 export const openRpcApp = new Hono();
 
-// Serve patched HTML at root
-openRpcApp.get("/", (c) => c.html(playgroundHtml));
+// Serve patched HTML
+openRpcApp.get("/", (c) => c.html(patchedHtml));
 
-// Serve patched JS (intercept before serveStatic catches it)
+// Serve patched JS
 openRpcApp.get(`/assets/${jsName}`, (c) => {
   return c.body(patchedJs, 200, { "Content-Type": "application/javascript" });
 });
 
-// Serve all other static assets (CSS, fonts, icons, etc.) from node_modules
-openRpcApp.use("/*", serveStatic({ root: `./${playgroundDist}` }));
+// Serve all other static assets (CSS, fonts, icons, etc.)
+openRpcApp.get("/*", serveStatic({ root: `./${playgroundDist}` }));

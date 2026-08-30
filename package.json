@@ -1,6 +1,7 @@
 {
   "name": "hono-json-rpc",
   "scripts": {
+    "start": "bun run src/index.ts",
     "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
@@ -8,6 +9,7 @@
     "@open-rpc/spec-types": "^0.0.2",
     "glob": "^13.0.6",
     "hono": "^4.13.5",
+    "json-rpc-2.0": "^1.8.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
